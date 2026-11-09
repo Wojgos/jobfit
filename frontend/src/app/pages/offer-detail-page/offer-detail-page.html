@@ -1,0 +1,170 @@
+<a routerLink="/offers" class="text-sm text-slate-500 hover:text-slate-900">← All offers</a>
+
+@if (store.error()) {
+  <p class="alert-error mt-4" role="alert">{{ store.error() }}</p>
+}
+
+@if (store.offer(); as offer) {
+  <header class="mt-3 flex flex-wrap items-start justify-between gap-4">
+    <div>
+      <h1 class="text-2xl font-bold text-slate-900">{{ offer.title }}</h1>
+      <p class="mt-1 text-slate-600">
+        {{ offer.company || 'Unknown company' }}
+        @if (offer.status) {
+          · <span class="font-medium">{{ statusLabels[offer.status] }}</span>
+        }
+        @if (offer.source_url) {
+          · <a [href]="offer.source_url" target="_blank" rel="noopener" class="underline">original</a>
+        }
+      </p>
+    </div>
+    <div class="text-right">
+      <p class="text-xs font-semibold tracking-wide text-slate-500 uppercase">Match</p>
+      <app-score-badge [score]="offer.score" />
+    </div>
+  </header>
+
+  @if (analysis(); as a) {
+    <section class="card mt-6" aria-label="Summary">
+      <p class="text-slate-700">{{ a.summary }}</p>
+      <dl class="mt-4 grid gap-4 text-sm sm:grid-cols-3">
+        <div>
+          <dt class="text-slate-500">Seniority</dt>
+          <dd class="font-medium capitalize">{{ a.extraction.seniority }}</dd>
+        </div>
+        <div>
+          <dt class="text-slate-500">Work mode</dt>
+          <dd class="font-medium capitalize">{{ a.extraction.work_mode }}</dd>
+        </div>
+        <div>
+          <dt class="text-slate-500">Salary per month</dt>
+          <dd class="font-medium">
+            {{ salary() ?? 'not stated' }}
+            @if (a.salary && a.salary.contract !== 'unknown') {
+              <span class="text-slate-500 uppercase">({{ a.salary.contract }})</span>
+            }
+          </dd>
+        </div>
+      </dl>
+    </section>
+
+    <div class="mt-6 grid gap-6 lg:grid-cols-2">
+      @for (group of groups(); track group.title) {
+        <section class="card" [attr.aria-label]="group.title">
+          <h2 class="font-semibold text-slate-900">{{ group.title }}</h2>
+          <ul class="mt-3 divide-y divide-slate-100">
+            @for (m of group.items; track m.name) {
+              <li class="py-2.5">
+                <div class="flex items-center justify-between gap-3">
+                  <span class="font-medium text-slate-800">{{ m.name }}</span>
+                  <span
+                    class="rounded-full px-2 py-0.5 text-xs font-semibold ring-1 ring-inset"
+                    [class]="matchLabels[m.status].classes"
+                  >
+                    {{ matchLabels[m.status].label }}
+                  </span>
+                </div>
+                @if (m.evidence) {
+                  <p class="mt-1 line-clamp-2 text-sm text-slate-500">“{{ m.evidence }}”</p>
+                }
+              </li>
+            } @empty {
+              <li class="py-2 text-sm text-slate-500">None listed.</li>
+            }
+          </ul>
+        </section>
+      }
+    </div>
+  }
+
+  <div class="mt-6 grid gap-6 lg:grid-cols-2">
+    <section class="card" aria-labelledby="letter-title">
+      <h2 id="letter-title" class="font-semibold text-slate-900">Cover letter</h2>
+      <div class="mt-3 flex gap-2">
+        <button
+          type="button"
+          class="btn btn-secondary"
+          [disabled]="store.letterLoading()"
+          (click)="store.writeLetter('pl')"
+        >
+          Polish
+        </button>
+        <button
+          type="button"
+          class="btn btn-secondary"
+          [disabled]="store.letterLoading()"
+          (click)="store.writeLetter('en')"
+        >
+          English
+        </button>
+        @if (store.letter()) {
+          <button type="button" class="btn btn-secondary ml-auto" (click)="copyLetter()">Copy</button>
+        }
+      </div>
+      @if (store.letterLoading()) {
+        <p class="mt-3 text-sm text-slate-400">Writing…</p>
+      } @else if (store.letter()) {
+        <p class="mt-3 text-sm whitespace-pre-line text-slate-700">{{ store.letter() }}</p>
+      }
+    </section>
+
+    <section class="card flex flex-col" aria-labelledby="chat-title">
+      <h2 id="chat-title" class="font-semibold text-slate-900">Ask the assistant</h2>
+      <p class="text-sm text-slate-500">It can search your CV and read this analysis.</p>
+
+      <ol class="mt-3 flex-1 space-y-4" aria-live="polite">
+        @for (turn of store.chat(); track $index) {
+          <li>
+            <p class="ml-auto w-fit max-w-[85%] rounded-lg bg-indigo-600 px-3 py-2 text-sm text-white">
+              {{ turn.question }}
+            </p>
+            @if (turn.answer === null) {
+              <p class="mt-2 text-sm text-slate-400">Thinking…</p>
+            } @else {
+              <div class="mt-2 max-w-[85%] rounded-lg bg-slate-100 px-3 py-2 text-sm">
+                <p class="whitespace-pre-line">{{ turn.answer }}</p>
+                @if (turn.steps.length) {
+                  <details class="mt-2 text-xs text-slate-500">
+                    <summary class="cursor-pointer">{{ turn.steps.length }} tool call(s)</summary>
+                    <ul class="mt-1 space-y-1">
+                      @for (step of turn.steps; track $index) {
+                        <li><code>{{ step.tool }}</code> {{ step.result_preview }}</li>
+                      }
+                    </ul>
+                  </details>
+                }
+              </div>
+            }
+          </li>
+        } @empty {
+          <li class="flex flex-wrap gap-2">
+            @for (s of suggestions; track s) {
+              <button
+                type="button"
+                class="rounded-full border border-slate-200 px-3 py-1 text-xs text-slate-600 hover:bg-slate-50"
+                (click)="send(s)"
+              >
+                {{ s }}
+              </button>
+            }
+          </li>
+        }
+      </ol>
+
+      <form class="mt-4 flex gap-2" (submit)="$event.preventDefault(); send()">
+        <label for="question" class="sr-only">Question</label>
+        <input
+          id="question"
+          class="input"
+          placeholder="Ask about this offer…"
+          [formControl]="question"
+        />
+        <button type="submit" class="btn btn-primary" [disabled]="question.invalid || asking()">
+          Send
+        </button>
+      </form>
+    </section>
+  </div>
+} @else if (store.loading()) {
+  <p class="mt-6 text-slate-400">Loading…</p>
+}

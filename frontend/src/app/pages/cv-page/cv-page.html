@@ -1,0 +1,62 @@
+<h1 class="text-2xl font-bold text-slate-900">My CV</h1>
+<p class="mt-1 text-sm text-slate-600">
+  Offers are matched against the most recently uploaded CV. It is split into fragments and
+  embedded for semantic search.
+</p>
+
+@if (store.error()) {
+  <p class="alert-error mt-4" role="alert">{{ store.error() }}</p>
+}
+
+<section class="card mt-6" aria-labelledby="current-cv">
+  <h2 id="current-cv" class="text-sm font-semibold tracking-wide text-slate-500 uppercase">
+    Current CV
+  </h2>
+  @if (store.cv(); as cv) {
+    <p class="mt-2 text-lg font-medium text-slate-900">{{ cv.filename }}</p>
+    <p class="text-sm text-slate-600">
+      {{ cv.chunks }} fragments · uploaded {{ cv.created_at | date: 'medium' }}
+    </p>
+  } @else if (store.loaded()) {
+    <p class="mt-2 text-slate-600">No CV yet. Upload one to start analysing offers.</p>
+  } @else {
+    <p class="mt-2 text-slate-400">Loading…</p>
+  }
+</section>
+
+<div class="mt-6 grid gap-6 md:grid-cols-2">
+  <section class="card" aria-labelledby="upload-file">
+    <h2 id="upload-file" class="font-semibold text-slate-900">Upload a file</h2>
+    <p class="mt-1 text-sm text-slate-600">PDF or plain text, up to 5 MB.</p>
+    <label class="btn btn-secondary mt-4 cursor-pointer">
+      Choose file
+      <input
+        type="file"
+        accept=".pdf,.txt,text/plain,application/pdf"
+        class="sr-only"
+        [disabled]="store.saving()"
+        (change)="onFile($event)"
+      />
+    </label>
+  </section>
+
+  <section class="card" aria-labelledby="paste-text">
+    <h2 id="paste-text" class="font-semibold text-slate-900">…or paste the text</h2>
+    <label for="cv-text" class="sr-only">CV text</label>
+    <textarea
+      id="cv-text"
+      rows="8"
+      class="input mt-3"
+      placeholder="Paste the content of your CV"
+      [formControl]="text"
+    ></textarea>
+    <button
+      type="button"
+      class="btn btn-primary mt-3"
+      [disabled]="text.invalid || store.saving()"
+      (click)="submitText()"
+    >
+      {{ store.saving() ? 'Saving…' : 'Save CV' }}
+    </button>
+  </section>
+</div>
