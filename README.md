@@ -5,7 +5,13 @@ offer with an LLM, finds evidence for each of them in your CV with vector search
 match, normalises the salary, drafts a cover letter and tracks your applications on a board.
 An assistant with tool calling answers follow-up questions about a specific offer.
 
-> Status: backend MVP. Angular frontend and cloud deployment are next (see [Roadmap](#roadmap)).
+> Status: working MVP (backend + Angular frontend). Cloud deployment is next, see [Roadmap](#roadmap).
+
+| Offer analysis | Application board |
+| --- | --- |
+| ![Offer analysis](docs/screenshots/offer-detail.png) | ![Board](docs/screenshots/board.png) |
+
+![Offer list](docs/screenshots/offers.png)
 
 ## How it works
 
@@ -54,8 +60,23 @@ rule-based judge. The whole flow works without network access, and the test suit
 **Backend:** Python 3.12, FastAPI, SQLAlchemy 2 (async), asyncpg, Pydantic v2, Alembic,
 PostgreSQL 16 + pgvector, Google Gemini (`google-genai`), pypdf
 
+**Frontend:** Angular 22 (standalone components, zoneless change detection, signals, signal
+inputs, new control flow), NgRx Signal Store with entities and `rxMethod`, Angular CDK drag and
+drop, Reactive Forms, Tailwind CSS 4, nginx
+
 **Quality:** pytest (unit + API tests against a real Postgres), mypy in strict mode, Ruff,
-GitHub Actions (lint, types, migrations up and down, tests, Docker build)
+Vitest for stores and components, angular-eslint with template accessibility rules,
+GitHub Actions for both apps (lint, types, migrations up and down, tests, builds, Docker images)
+
+### Frontend state
+
+Each feature has a small NgRx Signal Store:
+
+- `OffersStore` and `BoardStore` keep entities (`withEntities`) and load them with `rxMethod`.
+- Moving a card on the board is **optimistic**: it changes column at once and moves back if
+  the API call fails.
+- `OfferDetailStore` is provided by the page component, so the chat and cover letter reset on
+  navigation; `exhaustMap` ignores a new question while the previous one is still answered.
 
 ## Quick start
 
@@ -68,7 +89,7 @@ cp backend/.env.example backend/.env   # optional: set LLM_PROVIDER=gemini and G
 docker compose up --build
 ```
 
-API docs: http://localhost:8000/docs
+App: http://localhost:4200 · API docs: http://localhost:8000/docs
 
 ```bash
 # 1. upload your CV (PDF or .txt)
@@ -113,6 +134,11 @@ uv run uvicorn app.main:app --reload
 
 uv run pytest                           # uses the jobfit_test database
 uv run ruff check . && uv run mypy app tests
+
+cd ../frontend
+npm ci
+npm start                               # http://localhost:4200, /api proxied to :8000
+npm test && npx ng lint
 ```
 
 ## Project structure
@@ -128,12 +154,17 @@ backend/
     db/           SQLAlchemy models and session
   alembic/        migrations (pgvector extension, HNSW index)
   tests/
+frontend/src/app/
+  core/           API client and types mirroring the backend schemas
+  state/          NgRx Signal Stores (CV, offers, offer detail, board) with specs
+  pages/          offers, offer detail with cover letter and assistant chat, board, CV
+  ui/             score badge, labels and formatting helpers
 ```
 
 ## Roadmap
 
 - [x] Backend: CV ingestion, offer analysis, scoring, salary, cover letter, assistant, board
-- [ ] Angular frontend with NgRx Signal Store: offer view, Kanban board, assistant chat
+- [x] Angular frontend with NgRx Signal Store: offer view, Kanban board, assistant chat
 - [ ] Deployment to Google Cloud Run with Terraform and continuous delivery from GitHub Actions
 - [ ] Evaluation set for extraction quality (precision and recall of requirements)
 - [ ] Authentication and per-user data
