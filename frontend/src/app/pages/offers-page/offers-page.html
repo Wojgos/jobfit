@@ -75,14 +75,16 @@
             @if (offer.status) {
               <span class="text-xs font-medium text-slate-500">{{ statusLabels[offer.status] }}</span>
             }
-            <button
-              type="button"
-              class="rounded-md p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
-              [attr.aria-label]="'Delete ' + offer.title"
-              (click)="offers.remove(offer.id)"
-            >
-              ✕
-            </button>
+            @if (!meta.demoMode()) {
+              <button
+                type="button"
+                class="rounded-md p-1.5 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                [attr.aria-label]="'Delete ' + offer.title"
+                (click)="offers.remove(offer.id)"
+              >
+                ✕
+              </button>
+            }
           </li>
         } @empty {
           <li class="card text-center text-slate-500">No offers yet.</li>

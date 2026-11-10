@@ -1,11 +1,11 @@
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
-import { Provider } from '@angular/core';
+import { EnvironmentProviders, Provider } from '@angular/core';
 import { TestBed } from '@angular/core/testing';
 
 import { Application, ApplicationStatus, OfferDetail } from './core/models';
 
-export function setupHttp(...providers: Provider[]): HttpTestingController {
+export function setupHttp(...providers: (Provider | EnvironmentProviders)[]): HttpTestingController {
   TestBed.configureTestingModule({
     providers: [provideHttpClient(), provideHttpClientTesting(), ...providers],
   });

@@ -4,6 +4,7 @@ import { FormControl, FormGroup, ReactiveFormsModule, Validators } from '@angula
 import { Router, RouterLink } from '@angular/router';
 
 import { CvStore } from '../../state/cv.store';
+import { MetaStore } from '../../state/meta.store';
 import { OffersStore } from '../../state/offers.store';
 import { STATUS_LABELS } from '../../ui/labels';
 import { ScoreBadge } from '../../ui/score-badge';
@@ -17,6 +18,7 @@ import { ScoreBadge } from '../../ui/score-badge';
 export class OffersPage {
   protected readonly offers = inject(OffersStore);
   protected readonly cv = inject(CvStore);
+  protected readonly meta = inject(MetaStore);
   private readonly router = inject(Router);
   protected readonly statusLabels = STATUS_LABELS;
 

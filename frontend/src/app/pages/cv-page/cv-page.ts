@@ -3,6 +3,7 @@ import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { FormControl, ReactiveFormsModule, Validators } from '@angular/forms';
 
 import { CvStore } from '../../state/cv.store';
+import { MetaStore } from '../../state/meta.store';
 
 @Component({
   selector: 'app-cv-page',
@@ -12,6 +13,7 @@ import { CvStore } from '../../state/cv.store';
 })
 export class CvPage {
   protected readonly store = inject(CvStore);
+  protected readonly meta = inject(MetaStore);
   protected readonly text = new FormControl('', {
     nonNullable: true,
     validators: [Validators.required, Validators.minLength(50)],

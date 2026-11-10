@@ -24,6 +24,12 @@
   }
 </section>
 
+@if (meta.demoMode()) {
+  <p class="mt-6 rounded-lg bg-indigo-50 px-4 py-3 text-sm text-indigo-800">
+    This public demo uses a fictional sample CV. To analyse offers against your own CV, run
+    JobFit locally with <code>docker compose up</code>.
+  </p>
+} @else {
 <div class="mt-6 grid gap-6 md:grid-cols-2">
   <section class="card" aria-labelledby="upload-file">
     <h2 id="upload-file" class="font-semibold text-slate-900">Upload a file</h2>
@@ -60,3 +66,4 @@
     </button>
   </section>
 </div>
+}

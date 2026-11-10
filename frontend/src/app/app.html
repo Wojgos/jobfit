@@ -20,6 +20,13 @@
   </nav>
 </header>
 
+@if (meta.demoMode()) {
+  <div class="bg-indigo-600 px-4 py-2 text-center text-sm text-white" role="status">
+    Public demo with a sample CV — data resets every night, CV upload is disabled.
+    <a href="https://github.com/Wojgos/jobfit" class="font-semibold underline">Source on GitHub</a>
+  </div>
+}
+
 <main class="mx-auto max-w-6xl px-4 py-8">
   <router-outlet />
 </main>

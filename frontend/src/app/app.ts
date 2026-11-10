@@ -1,5 +1,7 @@
-import { ChangeDetectionStrategy, Component } from '@angular/core';
+import { ChangeDetectionStrategy, Component, inject } from '@angular/core';
 import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
+
+import { MetaStore } from './state/meta.store';
 
 @Component({
   selector: 'app-root',
@@ -8,6 +10,7 @@ import { RouterLink, RouterLinkActive, RouterOutlet } from '@angular/router';
   templateUrl: './app.html',
 })
 export class App {
+  protected readonly meta = inject(MetaStore);
   protected readonly links = [
     { path: '/offers', label: 'Offers' },
     { path: '/board', label: 'Board' },
