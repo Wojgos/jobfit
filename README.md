@@ -5,7 +5,7 @@ offer with an LLM, finds evidence for each of them in your CV with vector search
 match, normalises the salary, drafts a cover letter and tracks your applications on a board.
 An assistant with tool calling answers follow-up questions about a specific offer.
 
-> Status: working MVP (backend + Angular frontend). Cloud deployment is next, see [Roadmap](#roadmap).
+> Status: working MVP (backend + Angular frontend), ready to deploy to Google Cloud Run as a public demo - see [Deployment](#deployment).
 
 | Offer analysis | Application board |
 | --- | --- |
@@ -123,6 +123,22 @@ A free Gemini API key is available at [Google AI Studio](https://aistudio.google
 | `GET` | `/api/applications` | Application board |
 | `PATCH` | `/api/applications/{id}` | Change status (`to_apply`, `applied`, `interview`, `offer`, `rejected`) or notes |
 
+## Deployment
+
+The public demo runs as one Cloud Run service: a multi-stage [`Dockerfile`](Dockerfile) builds the
+Angular app and FastAPI serves it next to the API. Neon provides Postgres with pgvector.
+
+- **Infrastructure as code** - [`infra/`](infra) (Terraform): Artifact Registry with a cleanup
+  policy, Cloud Run (scale to zero, max one instance), Secret Manager access, and Workload
+  Identity Federation so GitHub Actions deploys without long-lived keys.
+- **Continuous delivery** - after CI passes on `main`, [`deploy.yml`](.github/workflows/deploy.yml)
+  builds, pushes and rolls out the image, then smoke-tests `/health`.
+- **Demo mode** - sample CV and offers, CV upload and deletion disabled, 20 AI requests per IP
+  per hour, nightly data reset by [`demo-reset.yml`](.github/workflows/demo-reset.yml).
+- **Cost guard rails** - free tiers everywhere, spend caps on Cloud Run and the Gemini API.
+
+Step-by-step guide with costs: [docs/DEPLOY.md](docs/DEPLOY.md).
+
 ## Development
 
 ```bash
@@ -165,7 +181,7 @@ frontend/src/app/
 
 - [x] Backend: CV ingestion, offer analysis, scoring, salary, cover letter, assistant, board
 - [x] Angular frontend with NgRx Signal Store: offer view, Kanban board, assistant chat
-- [ ] Deployment to Google Cloud Run with Terraform and continuous delivery from GitHub Actions
+- [x] Deployment setup for Google Cloud Run: Terraform, keyless continuous delivery, demo mode
 - [ ] Evaluation set for extraction quality (precision and recall of requirements)
 - [ ] Authentication and per-user data
 
