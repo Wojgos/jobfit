@@ -1,0 +1,56 @@
+name: deploy
+
+# Runs after the backend or frontend workflow succeeds on main. Skipped until the
+# GCP_* repository variables exist (see docs/DEPLOY.md), so forks and fresh clones stay green.
+on:
+  workflow_run:
+    workflows: [backend, frontend]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  id-token: write # OIDC token for Workload Identity Federation (no JSON keys)
+
+jobs:
+  deploy:
+    if: >-
+      vars.GCP_PROJECT_ID != '' &&
+      (github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-latest
+    env:
+      REGION: ${{ vars.GCP_REGION }}
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SHA }}
+
+      - uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_DEPLOY_SA }}
+
+      - uses: google-github-actions/setup-gcloud@v3
+
+      - name: Build and push the image
+        run: |
+          IMAGE="$REGION-docker.pkg.dev/${{ vars.GCP_PROJECT_ID }}/jobfit/app:$SHA"
+          echo "IMAGE=$IMAGE" >> "$GITHUB_ENV"
+          gcloud auth configure-docker "$REGION-docker.pkg.dev" --quiet
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+
+      - name: Deploy to Cloud Run
+        run: gcloud run deploy jobfit --image "$IMAGE" --region "$REGION" --quiet
+
+      - name: Smoke test
+        run: |
+          URL=$(gcloud run services describe jobfit --region "$REGION" --format 'value(status.url)')
+          curl --fail --silent --show-error --retry 5 --retry-delay 5 "$URL/health"
+          echo "Deployed to $URL" >> "$GITHUB_STEP_SUMMARY"

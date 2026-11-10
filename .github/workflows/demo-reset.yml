@@ -1,0 +1,21 @@
+name: demo-reset
+
+# Restores the sample data of the public demo every night.
+on:
+  schedule:
+    - cron: "0 3 * * *" # 03:00 UTC
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  reset:
+    if: vars.DEMO_URL != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reset demo data
+        env:
+          ADMIN_TOKEN: ${{ secrets.DEMO_ADMIN_TOKEN }}
+        run: |
+          curl --fail --silent --show-error --max-time 120 -X POST \
+            -H "X-Admin-Token: $ADMIN_TOKEN" "${{ vars.DEMO_URL }}/api/admin/reset"
