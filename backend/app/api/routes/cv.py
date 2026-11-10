@@ -1,6 +1,6 @@
-from fastapi import APIRouter, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
 
-from app.api.deps import LLMDep, SessionDep
+from app.api.deps import LLMDep, SessionDep, forbid_in_demo
 from app.schemas.api import CvOut, CvTextIn
 from app.services.cv_service import (
     EmptyCvError,
@@ -25,7 +25,7 @@ async def _store(session: SessionDep, llm: LLMDep, filename: str, text: str) -> 
     )
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post("", status_code=status.HTTP_201_CREATED, dependencies=[Depends(forbid_in_demo)])
 async def upload_cv(file: UploadFile, session: SessionDep, llm: LLMDep) -> CvOut:
     """Upload a CV as PDF or plain text. The newest CV is used for matching."""
     data = await file.read(MAX_UPLOAD_BYTES + 1)
@@ -41,7 +41,7 @@ async def upload_cv(file: UploadFile, session: SessionDep, llm: LLMDep) -> CvOut
     return await _store(session, llm, filename, text)
 
 
-@router.post("/text", status_code=status.HTTP_201_CREATED)
+@router.post("/text", status_code=status.HTTP_201_CREATED, dependencies=[Depends(forbid_in_demo)])
 async def upload_cv_text(body: CvTextIn, session: SessionDep, llm: LLMDep) -> CvOut:
     return await _store(session, llm, body.filename, body.text)
 

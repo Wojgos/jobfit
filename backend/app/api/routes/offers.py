@@ -1,12 +1,13 @@
 import uuid
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from app.agent.loop import run_agent
 from app.agent.tools import AgentContext
-from app.api.deps import LLMDep, SessionDep
+from app.api.deps import LLMDep, SessionDep, forbid_in_demo
+from app.api.rate_limit import llm_rate_limit
 from app.core.config import get_settings
 from app.db.models import JobOffer
 from app.schemas.analysis import NormalizedSalary, OfferExtraction, RequirementMatch
@@ -68,7 +69,7 @@ async def _get_offer(session: SessionDep, offer_id: uuid.UUID) -> JobOffer:
     return offer
 
 
-@router.post("", status_code=status.HTTP_201_CREATED)
+@router.post("", status_code=status.HTTP_201_CREATED, dependencies=[Depends(llm_rate_limit)])
 async def create_offer(body: OfferIn, session: SessionDep, llm: LLMDep) -> OfferDetail:
     """Analyse a pasted job offer against the current CV and add it to the board."""
     try:
@@ -95,13 +96,17 @@ async def get_offer(offer_id: uuid.UUID, session: SessionDep) -> OfferDetail:
     return _detail(await _get_offer(session, offer_id))
 
 
-@router.delete("/{offer_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{offer_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(forbid_in_demo)],
+)
 async def delete_offer(offer_id: uuid.UUID, session: SessionDep) -> None:
     await session.delete(await _get_offer(session, offer_id))
     await session.commit()
 
 
-@router.post("/{offer_id}/cover-letter")
+@router.post("/{offer_id}/cover-letter", dependencies=[Depends(llm_rate_limit)])
 async def cover_letter(
     offer_id: uuid.UUID, body: CoverLetterIn, session: SessionDep, llm: LLMDep
 ) -> CoverLetterOut:
@@ -109,7 +114,7 @@ async def cover_letter(
     return CoverLetterOut(text=await write_cover_letter(llm, offer, body.language))
 
 
-@router.post("/{offer_id}/ask")
+@router.post("/{offer_id}/ask", dependencies=[Depends(llm_rate_limit)])
 async def ask(offer_id: uuid.UUID, body: AskIn, session: SessionDep, llm: LLMDep) -> AskOut:
     """Ask the assistant about this offer; it can search the CV and read the analysis."""
     offer = await _get_offer(session, offer_id)
