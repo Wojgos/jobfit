@@ -117,7 +117,7 @@ class TestProviderErrors:
         from app.llm.gemini import GeminiClient
 
         client = GeminiClient(
-            api_key="test", model="m", embedding_model="e", embedding_dim=8, call_timeout=0.05
+            api_key="test", models=["m"], embedding_model="e", embedding_dim=8, call_timeout=0.05
         )
 
         async def failing(code: int) -> None:
@@ -233,3 +233,44 @@ class TestSeedLLM:
         )
         assert real.embedded == ["Python"]
         assert extraction.title == "Junior Python Developer"
+
+
+class TestModelFallback:
+    async def test_overloaded_or_retired_models_fall_through_to_the_next(self) -> None:
+        from types import SimpleNamespace
+
+        from google.genai import errors
+
+        from app.llm.base import LLMError
+        from app.llm.gemini import GeminiClient
+
+        calls: list[str] = []
+        behaviour = {"retired": 404, "overloaded": 503, "ok": None}
+
+        async def generate_content(*, model: str, contents: object, config: object) -> object:
+            calls.append(model)
+            code = behaviour[model]
+            if code:
+                raise errors.ServerError(code, {"error": {"code": code, "message": "x"}})
+            return SimpleNamespace(text=" answer ", parsed=None, candidates=[])
+
+        client = GeminiClient(
+            api_key="test",
+            models=["retired", "overloaded", "ok"],
+            embedding_model="e",
+            embedding_dim=8,
+        )
+        client._client = SimpleNamespace(  # type: ignore[assignment]
+            aio=SimpleNamespace(models=SimpleNamespace(generate_content=generate_content))
+        )
+
+        assert await client.generate(system="s", prompt="p") == "answer"
+        assert calls == ["retired", "overloaded", "ok"]
+
+        calls.clear()
+        await client.generate(system="s", prompt="p")
+        assert calls == ["overloaded", "ok"]  # the retired model is skipped from now on
+
+        behaviour["ok"] = 400  # a bad request is not the model's fault: no fallback
+        with pytest.raises(LLMError):
+            await client.generate(system="s", prompt="p")

@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from collections.abc import Awaitable
 from typing import Any, TypeVar
 
@@ -8,40 +9,47 @@ from google.genai import errors, types
 from app.llm.base import EmbedTask, LLMError, LLMStep, Message, T, ToolCall, ToolSpec
 
 R = TypeVar("R")
+logger = logging.getLogger(__name__)
 
-# Free-tier quotas are a few requests per minute: back off and retry before giving up.
+# One quick retry; a model that keeps failing is skipped in favour of the next one.
 RETRY = types.HttpRetryOptions(
-    attempts=3, initial_delay=2.0, max_delay=20.0, http_status_codes=[429, 500, 503, 504]
+    attempts=2, initial_delay=1.5, max_delay=5.0, http_status_codes=[429, 500, 503, 504]
 )
 THINKING_LEVELS = {
     "low": types.ThinkingLevel.LOW,
     "medium": types.ThinkingLevel.MEDIUM,
     "high": types.ThinkingLevel.HIGH,
 }
+# Codes that say "this model, right now" rather than "this request": try the next model.
+FALLBACK_CODES = {404, 500, 503, 504}
 
 
 class GeminiClient:
-    """Gemini 3.x client.
+    """Gemini 3.x client with a model fallback chain.
 
     Gemini 3 ignores ``temperature``/``top_p``/``top_k`` (deprecated), so determinism comes
-    from the system instructions. ``thinking_level="low"`` keeps latency down; extracting
-    requirements and judging matches do not need long reasoning.
+    from the system instructions. On the free tier the newest models are often overloaded
+    (503) and older ones get closed to new users (404), so generation walks through
+    ``models`` in order and remembers models that are not available at all.
     """
 
     def __init__(
         self,
         *,
         api_key: str,
-        model: str,
+        models: list[str],
         embedding_model: str,
         embedding_dim: int,
-        thinking_level: str | None = "low",
-        call_timeout: float = 50.0,
+        thinking_level: str | None = None,
+        call_timeout: float = 30.0,
     ) -> None:
+        if not models:
+            raise ValueError("At least one model is required")
         self._client = genai.Client(
             api_key=api_key, http_options=types.HttpOptions(retry_options=RETRY)
         )
-        self._model = model
+        self._models = list(dict.fromkeys(models))
+        self._unavailable: set[str] = set()
         self._embedding_model = embedding_model
         self._embedding_dim = embedding_dim
         self._thinking = (
@@ -52,10 +60,7 @@ class GeminiClient:
         self._timeout = call_timeout
 
     async def _call(self, request: Awaitable[R]) -> R:
-        """Bound every request (retries included) and translate provider errors.
-
-        Two model calls per analysis must fit in the 120 s Cloud Run request timeout.
-        """
+        """Bound one request (SDK retries included) and translate provider errors."""
         try:
             return await asyncio.wait_for(request, self._timeout)
         except TimeoutError as exc:
@@ -65,7 +70,31 @@ class GeminiClient:
                 raise LLMError(
                     "The AI quota is used up for now. Try again in a minute.", 429
                 ) from exc
-            raise LLMError(f"The AI provider returned an error ({exc.code}).") from exc
+            error = LLMError(f"The AI provider returned an error ({exc.code}).")
+            error.provider_code = exc.code
+            raise error from exc
+
+    async def _generate(
+        self, contents: Any, config: types.GenerateContentConfig
+    ) -> types.GenerateContentResponse:
+        last: LLMError | None = None
+        for model in [m for m in self._models if m not in self._unavailable] or self._models:
+            try:
+                return await self._call(
+                    self._client.aio.models.generate_content(
+                        model=model, contents=contents, config=config
+                    )
+                )
+            except LLMError as exc:
+                code = exc.provider_code or exc.status_code
+                if code not in FALLBACK_CODES:
+                    raise
+                if code == 404:
+                    self._unavailable.add(model)
+                logger.warning("Model %s failed (%s), trying the next one", model, code)
+                last = exc
+        assert last is not None
+        raise last
 
     def _config(self, system: str, **options: Any) -> types.GenerateContentConfig:
         return types.GenerateContentConfig(
@@ -73,25 +102,16 @@ class GeminiClient:
         )
 
     async def structured(self, *, system: str, prompt: str, schema: type[T]) -> T:
-        response = await self._call(
-            self._client.aio.models.generate_content(
-                model=self._model,
-                contents=prompt,
-                config=self._config(
-                    system, response_mime_type="application/json", response_schema=schema
-                ),
-            )
+        response = await self._generate(
+            prompt,
+            self._config(system, response_mime_type="application/json", response_schema=schema),
         )
         if isinstance(response.parsed, schema):
             return response.parsed
         return schema.model_validate_json(response.text or "{}")
 
     async def generate(self, *, system: str, prompt: str) -> str:
-        response = await self._call(
-            self._client.aio.models.generate_content(
-                model=self._model, contents=prompt, config=self._config(system)
-            )
-        )
+        response = await self._generate(prompt, self._config(system))
         return (response.text or "").strip()
 
     async def embed(self, texts: list[str], *, task: EmbedTask) -> list[list[float]]:
@@ -116,16 +136,13 @@ class GeminiClient:
             )
             for t in tools
         ]
-        response = await self._call(
-            self._client.aio.models.generate_content(
-                model=self._model,
-                contents=self._to_contents(history),
-                config=self._config(
-                    system,
-                    tools=[types.Tool(function_declarations=declarations)],
-                    automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
-                ),
-            )
+        response = await self._generate(
+            self._to_contents(history),
+            self._config(
+                system,
+                tools=[types.Tool(function_declarations=declarations)],
+                automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+            ),
         )
         raw = response.candidates[0].content if response.candidates else None
         calls = [

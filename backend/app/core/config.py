@@ -37,12 +37,14 @@ class Settings(BaseSettings):
     # "fake" runs fully offline with deterministic heuristics (tests, demos without an API key).
     llm_provider: Literal["gemini", "fake"] = "fake"
     google_api_key: str | None = None
-    # Older Gemini models are closed to new API users; override with LLM_MODEL if needed.
-    llm_model: str = "gemini-3.8-flash"
+    # Tried in order: the newest models are often overloaded on the free tier and older
+    # ones get closed to new API users. Override with LLM_MODEL / LLM_FALLBACK_MODELS.
+    llm_model: str = "gemini-3.5-flash-lite"
+    llm_fallback_models: list[str] = ["gemini-3.6-flash", "gemini-3.8-flash"]
     embedding_model: str = "gemini-embedding-001"
-    # "low" keeps latency down on Gemini 3; empty string sends no thinking config.
-    llm_thinking_level: Literal["low", "medium", "high", ""] = "low"
-    llm_call_timeout_seconds: float = 50.0
+    # Empty: each model uses its default thinking level (minimal on flash-lite).
+    llm_thinking_level: Literal["low", "medium", "high", ""] = ""
+    llm_call_timeout_seconds: float = 30.0
 
     cors_origins: list[str] = ["http://localhost:4200"]
     agent_max_steps: int = 5

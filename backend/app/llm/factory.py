@@ -15,7 +15,7 @@ def get_llm() -> LLMClient:
 
         return GeminiClient(
             api_key=settings.google_api_key,
-            model=settings.llm_model,
+            models=[settings.llm_model, *settings.llm_fallback_models],
             embedding_model=settings.embedding_model,
             embedding_dim=EMBEDDING_DIM,
             thinking_level=settings.llm_thinking_level or None,
