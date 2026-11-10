@@ -9,7 +9,7 @@ from app.llm.base import EmbedTask, LLMError, LLMStep, Message, T, ToolCall, Too
 
 # Free-tier quotas are a few requests per minute: back off and retry before giving up.
 RETRY = types.HttpRetryOptions(
-    attempts=4, initial_delay=2.0, max_delay=30.0, http_status_codes=[429, 500, 503, 504]
+    attempts=3, initial_delay=2.0, max_delay=20.0, http_status_codes=[429, 500, 503, 504]
 )
 
 
@@ -27,7 +27,9 @@ async def _provider_errors() -> AsyncIterator[None]:
 class GeminiClient:
     def __init__(self, *, api_key: str, model: str, embedding_model: str, embedding_dim: int):
         self._client = genai.Client(
-            api_key=api_key, http_options=types.HttpOptions(retry_options=RETRY)
+            api_key=api_key,
+            # 60 s per attempt keeps a slow model below the 120 s Cloud Run request timeout.
+            http_options=types.HttpOptions(timeout=60_000, retry_options=RETRY),
         )
         self._model = model
         self._embedding_model = embedding_model

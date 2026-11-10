@@ -184,3 +184,30 @@ class TestStaticFrontend:
         async with spa_client as c:
             assert (await c.get("/health")).json() == {"status": "ok"}
             assert (await c.get("/api/does-not-exist")).status_code == 404
+
+
+class TestSeedLLM:
+    async def test_only_embeddings_go_to_the_real_provider(self) -> None:
+        from app.llm.prompting import build_prompt
+        from app.schemas.analysis import OfferExtraction
+        from app.services.demo import SeedLLM
+
+        class RealProvider:
+            def __init__(self) -> None:
+                self.embedded: list[str] = []
+
+            async def embed(self, texts: list[str], *, task: str) -> list[list[float]]:
+                self.embedded += texts
+                return [[1.0] for _ in texts]
+
+            async def structured(self, **kwargs: object) -> object:
+                raise AssertionError("generation must not be used while seeding")
+
+        real = RealProvider()
+        seed = SeedLLM(real)  # type: ignore[arg-type]
+        assert await seed.embed(["Python"], task="query") == [[1.0]]
+        extraction = await seed.structured(
+            system="", prompt=build_prompt("x", {"offer": OFFER_TEXT}), schema=OfferExtraction
+        )
+        assert real.embedded == ["Python"]
+        assert extraction.title == "Junior Python Developer"

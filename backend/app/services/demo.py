@@ -1,5 +1,6 @@
 """Sample data for the public demo. Everything here is fictional."""
 
+import asyncio
 import logging
 
 from sqlalchemy import select, text
@@ -7,11 +8,27 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.base import Base
 from app.db.models import Application, ApplicationStatus, JobOffer
-from app.llm.base import LLMClient
+from app.llm.base import EmbedTask, LLMClient
+from app.llm.fake import FakeLLM
 from app.services.analysis_service import analyze_offer
 from app.services.cv_service import ingest_cv
 
 logger = logging.getLogger(__name__)
+
+SEED_TIMEOUT_SECONDS = 90
+
+
+class SeedLLM(FakeLLM):
+    """Analyses the sample offers with the offline heuristics but embeds with the real
+    provider. Seeding then needs no generation quota and takes seconds, while the CV vectors
+    stay compatible with offers that visitors analyse with the real model."""
+
+    def __init__(self, llm: LLMClient) -> None:
+        self._llm = llm
+
+    async def embed(self, texts: list[str], *, task: EmbedTask) -> list[list[float]]:
+        return await self._llm.embed(texts, task=task)
+
 
 DEMO_CV = """Alex Nowak - Junior Python Developer (sample CV)
 
@@ -88,6 +105,7 @@ Nice to have:
 
 async def reset_demo(session: AsyncSession, llm: LLMClient) -> int:
     """Wipe all data and load the sample CV and offers. Returns the number of offers."""
+    llm = llm if isinstance(llm, FakeLLM) else SeedLLM(llm)
     tables = ", ".join(t.name for t in Base.metadata.sorted_tables)
     await session.execute(text(f"TRUNCATE {tables} CASCADE"))
     await session.commit()
@@ -111,7 +129,8 @@ async def seed_if_empty(session: AsyncSession, llm: LLMClient) -> None:
     """
     try:
         if await session.scalar(select(JobOffer.id).limit(1)) is None:
-            count = await reset_demo(session, llm)
+            # Bounded, so a slow provider can never stop the container from starting.
+            count = await asyncio.wait_for(reset_demo(session, llm), SEED_TIMEOUT_SECONDS)
             logger.info("Demo data seeded with %d offers", count)
     except Exception:
         logger.exception("Seeding demo data failed")
