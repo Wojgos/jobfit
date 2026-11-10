@@ -37,7 +37,8 @@ class Settings(BaseSettings):
     # "fake" runs fully offline with deterministic heuristics (tests, demos without an API key).
     llm_provider: Literal["gemini", "fake"] = "fake"
     google_api_key: str | None = None
-    llm_model: str = "gemini-2.5-flash"
+    # Older Gemini models are closed to new API users; override with LLM_MODEL if needed.
+    llm_model: str = "gemini-3.8-flash"
     embedding_model: str = "gemini-embedding-001"
 
     cors_origins: list[str] = ["http://localhost:4200"]

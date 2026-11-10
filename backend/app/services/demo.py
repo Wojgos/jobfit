@@ -6,7 +6,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.base import Base
-from app.db.models import Application, ApplicationStatus, CvDocument
+from app.db.models import Application, ApplicationStatus, JobOffer
 from app.llm.base import LLMClient
 from app.services.analysis_service import analyze_offer
 from app.services.cv_service import ingest_cv
@@ -105,9 +105,12 @@ async def reset_demo(session: AsyncSession, llm: LLMClient) -> int:
 
 
 async def seed_if_empty(session: AsyncSession, llm: LLMClient) -> None:
-    """Called on start-up in demo mode; never blocks the app from starting."""
+    """Called on start-up in demo mode; never blocks the app from starting.
+
+    Checks offers rather than the CV, so a seed that failed half-way is retried.
+    """
     try:
-        if await session.scalar(select(CvDocument.id).limit(1)) is None:
+        if await session.scalar(select(JobOffer.id).limit(1)) is None:
             count = await reset_demo(session, llm)
             logger.info("Demo data seeded with %d offers", count)
     except Exception:

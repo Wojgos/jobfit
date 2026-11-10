@@ -107,6 +107,60 @@ class TestDemoMode:
         assert response.status_code == 404
 
 
+class TestProviderErrors:
+    async def test_gemini_errors_become_llm_errors_with_the_right_status(self) -> None:
+        from google.genai import errors
+
+        from app.llm.base import LLMError
+        from app.llm.gemini import _provider_errors
+
+        for code, expected in [(429, 429), (404, 503), (500, 503)]:
+            with pytest.raises(LLMError) as caught:
+                async with _provider_errors():
+                    raise errors.ClientError(code, {"error": {"code": code, "message": "x"}})
+            assert caught.value.status_code == expected
+
+    async def test_api_answers_with_the_llm_error_status(
+        self, client: httpx.AsyncClient, cv: dict[str, object]
+    ) -> None:
+        from app.llm.base import LLMError
+        from app.llm.factory import get_llm
+        from app.llm.fake import FakeLLM
+        from app.main import app
+
+        class QuotaExhausted(FakeLLM):
+            async def structured(self, **kwargs: object) -> object:  # type: ignore[override]
+                raise LLMError("The AI quota is used up for now.", 429)
+
+        app.dependency_overrides[get_llm] = QuotaExhausted
+        try:
+            response = await client.post("/api/offers", json={"raw_text": OFFER_TEXT})
+        finally:
+            app.dependency_overrides.clear()
+            limiter.reset()
+        assert response.status_code == 429
+        assert response.json() == {"detail": "The AI quota is used up for now."}
+
+
+class TestDemoSeeding:
+    async def test_a_half_finished_seed_is_retried(
+        self, client: httpx.AsyncClient, cv: dict[str, object]
+    ) -> None:
+        """A CV without offers (e.g. the model failed on the first start) seeds again."""
+        from app.db.session import get_sessionmaker
+        from app.llm.fake import FakeLLM
+        from app.services.demo import seed_if_empty
+
+        async with get_sessionmaker()() as session:
+            await seed_if_empty(session, FakeLLM())
+        offers = (await client.get("/api/offers")).json()
+        assert len(offers) == len(DEMO_OFFERS)
+
+        async with get_sessionmaker()() as session:  # second start: nothing to do
+            await seed_if_empty(session, FakeLLM())
+        assert len((await client.get("/api/offers")).json()) == len(DEMO_OFFERS)
+
+
 class TestStaticFrontend:
     @pytest.fixture
     async def spa_client(self, tmp_path: Path) -> httpx.AsyncClient:

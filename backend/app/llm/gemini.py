@@ -1,52 +1,75 @@
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any
 
 from google import genai
-from google.genai import types
+from google.genai import errors, types
 
-from app.llm.base import EmbedTask, LLMStep, Message, T, ToolCall, ToolSpec
+from app.llm.base import EmbedTask, LLMError, LLMStep, Message, T, ToolCall, ToolSpec
+
+# Free-tier quotas are a few requests per minute: back off and retry before giving up.
+RETRY = types.HttpRetryOptions(
+    attempts=4, initial_delay=2.0, max_delay=30.0, http_status_codes=[429, 500, 503, 504]
+)
+
+
+@asynccontextmanager
+async def _provider_errors() -> AsyncIterator[None]:
+    """Turn SDK errors into LLMError so the API answers 429/503 instead of 500."""
+    try:
+        yield
+    except errors.APIError as exc:
+        if exc.code == 429:
+            raise LLMError("The AI quota is used up for now. Try again in a minute.", 429) from exc
+        raise LLMError(f"The AI provider returned an error ({exc.code}).") from exc
 
 
 class GeminiClient:
     def __init__(self, *, api_key: str, model: str, embedding_model: str, embedding_dim: int):
-        self._client = genai.Client(api_key=api_key)
+        self._client = genai.Client(
+            api_key=api_key, http_options=types.HttpOptions(retry_options=RETRY)
+        )
         self._model = model
         self._embedding_model = embedding_model
         self._embedding_dim = embedding_dim
 
     async def structured(self, *, system: str, prompt: str, schema: type[T]) -> T:
-        response = await self._client.aio.models.generate_content(
-            model=self._model,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                system_instruction=system,
-                temperature=0.0,
-                response_mime_type="application/json",
-                response_schema=schema,
-            ),
-        )
+        async with _provider_errors():
+            response = await self._client.aio.models.generate_content(
+                model=self._model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    system_instruction=system,
+                    temperature=0.0,
+                    response_mime_type="application/json",
+                    response_schema=schema,
+                ),
+            )
         if isinstance(response.parsed, schema):
             return response.parsed
         return schema.model_validate_json(response.text or "{}")
 
     async def generate(self, *, system: str, prompt: str) -> str:
-        response = await self._client.aio.models.generate_content(
-            model=self._model,
-            contents=prompt,
-            config=types.GenerateContentConfig(system_instruction=system, temperature=0.4),
-        )
+        async with _provider_errors():
+            response = await self._client.aio.models.generate_content(
+                model=self._model,
+                contents=prompt,
+                config=types.GenerateContentConfig(system_instruction=system, temperature=0.4),
+            )
         return (response.text or "").strip()
 
     async def embed(self, texts: list[str], *, task: EmbedTask) -> list[list[float]]:
         if not texts:
             return []
-        response = await self._client.aio.models.embed_content(
-            model=self._embedding_model,
-            contents=texts,
-            config=types.EmbedContentConfig(
-                task_type="RETRIEVAL_DOCUMENT" if task == "document" else "RETRIEVAL_QUERY",
-                output_dimensionality=self._embedding_dim,
-            ),
-        )
+        async with _provider_errors():
+            response = await self._client.aio.models.embed_content(
+                model=self._embedding_model,
+                contents=texts,
+                config=types.EmbedContentConfig(
+                    task_type="RETRIEVAL_DOCUMENT" if task == "document" else "RETRIEVAL_QUERY",
+                    output_dimensionality=self._embedding_dim,
+                ),
+            )
         return [list(e.values or []) for e in response.embeddings or []]
 
     async def step(self, *, system: str, history: list[Message], tools: list[ToolSpec]) -> LLMStep:
@@ -56,16 +79,17 @@ class GeminiClient:
             )
             for t in tools
         ]
-        response = await self._client.aio.models.generate_content(
-            model=self._model,
-            contents=self._to_contents(history),
-            config=types.GenerateContentConfig(
-                system_instruction=system,
-                temperature=0.0,
-                tools=[types.Tool(function_declarations=declarations)],
-                automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
-            ),
-        )
+        async with _provider_errors():
+            response = await self._client.aio.models.generate_content(
+                model=self._model,
+                contents=self._to_contents(history),
+                config=types.GenerateContentConfig(
+                    system_instruction=system,
+                    temperature=0.0,
+                    tools=[types.Tool(function_declarations=declarations)],
+                    automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
+                ),
+            )
         raw = response.candidates[0].content if response.candidates else None
         calls = [
             ToolCall(id=fc.id or f"call_{i}", name=fc.name or "", args=dict(fc.args or {}))

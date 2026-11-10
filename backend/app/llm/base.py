@@ -9,6 +9,14 @@ T = TypeVar("T", bound=BaseModel)
 EmbedTask = Literal["document", "query"]
 
 
+class LLMError(RuntimeError):
+    """The LLM provider failed; ``status_code`` is what the API should answer with."""
+
+    def __init__(self, message: str, status_code: int = 503) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
 @dataclass
 class ToolSpec:
     name: str

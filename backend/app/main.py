@@ -3,16 +3,17 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from starlette.exceptions import HTTPException as StarletteHTTPException
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 from starlette.types import Scope
 
 from app.api.routes import admin, applications, cv, health, offers
 from app.core.config import Settings, get_settings
 from app.db.session import get_sessionmaker
+from app.llm.base import LLMError
 from app.llm.factory import get_llm
 from app.services.demo import seed_if_empty
 
@@ -62,6 +63,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.exception_handler(LLMError)
+    async def llm_error(request: Request, exc: LLMError) -> JSONResponse:
+        return JSONResponse(status_code=exc.status_code, content={"detail": str(exc)})
+
     for module in (health, admin, cv, offers, applications):
         app.include_router(module.router)
     # Mounted last so that every API route wins over the catch-all static files.
