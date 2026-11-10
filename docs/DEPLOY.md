@@ -58,7 +58,15 @@ gcloud services enable secretmanager.googleapis.com
 
 ## 3. Secrets (typed by you, never stored in files)
 
-Each command reads the value from standard input: paste it, press Enter, then
+On Windows the easiest way is the helper script. It asks for the Neon URL and the Gemini key
+without echoing them, generates the admin token and stores everything in Secret Manager and
+the `DEMO_ADMIN_TOKEN` GitHub secret:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\infra\setup-secrets.ps1 -ProjectId YOUR_PROJECT_ID
+```
+
+Manually, each command reads the value from standard input: paste it, press Enter, then
 Ctrl+Z and Enter on Windows (Ctrl+D on macOS/Linux). Trailing newlines are ignored by the app.
 
 ```bash
@@ -86,6 +94,14 @@ terraform apply
 Terraform creates the Artifact Registry repository, the Cloud Run service (with a placeholder
 image), the runtime service account with access to the three secrets, and Workload Identity
 Federation so that only `main` of this repository can deploy. State stays local in `infra/`.
+
+If `gcloud auth application-default login` is not an option, give Terraform a short-lived
+token from your gcloud login instead: `$env:GOOGLE_OAUTH_ACCESS_TOKEN = gcloud auth print-access-token`
+(PowerShell) or `export GOOGLE_OAUTH_ACCESS_TOKEN=$(gcloud auth print-access-token)`.
+
+In a brand-new project the first Cloud Run revision can fail with *"internal error"* while the
+freshly enabled APIs and IAM bindings propagate. Run `terraform apply` again a few minutes later:
+the failed service is tainted and gets recreated.
 
 ## 5. Connect GitHub Actions
 
