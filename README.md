@@ -5,7 +5,8 @@ offer with an LLM, finds evidence for each of them in your CV with vector search
 match, normalises the salary, drafts a cover letter and tracks your applications on a board.
 An assistant with tool calling answers follow-up questions about a specific offer.
 
-> Status: working MVP (backend + Angular frontend), ready to deploy to Google Cloud Run as a public demo - see [Deployment](#deployment).
+> **Live demo:** https://jobfit-yh66iyjaxq-ew.a.run.app - sample CV and offers, real Gemini analysis for new offers
+> (data resets nightly). Runs on Google Cloud Run, see [Deployment](#deployment).
 
 | Offer analysis | Application board |
 | --- | --- |
