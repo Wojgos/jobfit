@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     # Older Gemini models are closed to new API users; override with LLM_MODEL if needed.
     llm_model: str = "gemini-3.8-flash"
     embedding_model: str = "gemini-embedding-001"
+    # "low" keeps latency down on Gemini 3; empty string sends no thinking config.
+    llm_thinking_level: Literal["low", "medium", "high", ""] = "low"
+    llm_call_timeout_seconds: float = 50.0
 
     cors_origins: list[str] = ["http://localhost:4200"]
     agent_max_steps: int = 5

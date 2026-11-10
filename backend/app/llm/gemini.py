@@ -1,70 +1,104 @@
-from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
-from typing import Any
+import asyncio
+from collections.abc import Awaitable
+from typing import Any, TypeVar
 
 from google import genai
 from google.genai import errors, types
 
 from app.llm.base import EmbedTask, LLMError, LLMStep, Message, T, ToolCall, ToolSpec
 
+R = TypeVar("R")
+
 # Free-tier quotas are a few requests per minute: back off and retry before giving up.
 RETRY = types.HttpRetryOptions(
     attempts=3, initial_delay=2.0, max_delay=20.0, http_status_codes=[429, 500, 503, 504]
 )
-
-
-@asynccontextmanager
-async def _provider_errors() -> AsyncIterator[None]:
-    """Turn SDK errors into LLMError so the API answers 429/503 instead of 500."""
-    try:
-        yield
-    except errors.APIError as exc:
-        if exc.code == 429:
-            raise LLMError("The AI quota is used up for now. Try again in a minute.", 429) from exc
-        raise LLMError(f"The AI provider returned an error ({exc.code}).") from exc
+THINKING_LEVELS = {
+    "low": types.ThinkingLevel.LOW,
+    "medium": types.ThinkingLevel.MEDIUM,
+    "high": types.ThinkingLevel.HIGH,
+}
 
 
 class GeminiClient:
-    def __init__(self, *, api_key: str, model: str, embedding_model: str, embedding_dim: int):
+    """Gemini 3.x client.
+
+    Gemini 3 ignores ``temperature``/``top_p``/``top_k`` (deprecated), so determinism comes
+    from the system instructions. ``thinking_level="low"`` keeps latency down; extracting
+    requirements and judging matches do not need long reasoning.
+    """
+
+    def __init__(
+        self,
+        *,
+        api_key: str,
+        model: str,
+        embedding_model: str,
+        embedding_dim: int,
+        thinking_level: str | None = "low",
+        call_timeout: float = 50.0,
+    ) -> None:
         self._client = genai.Client(
-            api_key=api_key,
-            # 60 s per attempt keeps a slow model below the 120 s Cloud Run request timeout.
-            http_options=types.HttpOptions(timeout=60_000, retry_options=RETRY),
+            api_key=api_key, http_options=types.HttpOptions(retry_options=RETRY)
         )
         self._model = model
         self._embedding_model = embedding_model
         self._embedding_dim = embedding_dim
+        self._thinking = (
+            types.ThinkingConfig(thinking_level=THINKING_LEVELS[thinking_level])
+            if thinking_level
+            else None
+        )
+        self._timeout = call_timeout
+
+    async def _call(self, request: Awaitable[R]) -> R:
+        """Bound every request (retries included) and translate provider errors.
+
+        Two model calls per analysis must fit in the 120 s Cloud Run request timeout.
+        """
+        try:
+            return await asyncio.wait_for(request, self._timeout)
+        except TimeoutError as exc:
+            raise LLMError("The AI model took too long to answer. Try again.", 504) from exc
+        except errors.APIError as exc:
+            if exc.code == 429:
+                raise LLMError(
+                    "The AI quota is used up for now. Try again in a minute.", 429
+                ) from exc
+            raise LLMError(f"The AI provider returned an error ({exc.code}).") from exc
+
+    def _config(self, system: str, **options: Any) -> types.GenerateContentConfig:
+        return types.GenerateContentConfig(
+            system_instruction=system, thinking_config=self._thinking, **options
+        )
 
     async def structured(self, *, system: str, prompt: str, schema: type[T]) -> T:
-        async with _provider_errors():
-            response = await self._client.aio.models.generate_content(
+        response = await self._call(
+            self._client.aio.models.generate_content(
                 model=self._model,
                 contents=prompt,
-                config=types.GenerateContentConfig(
-                    system_instruction=system,
-                    temperature=0.0,
-                    response_mime_type="application/json",
-                    response_schema=schema,
+                config=self._config(
+                    system, response_mime_type="application/json", response_schema=schema
                 ),
             )
+        )
         if isinstance(response.parsed, schema):
             return response.parsed
         return schema.model_validate_json(response.text or "{}")
 
     async def generate(self, *, system: str, prompt: str) -> str:
-        async with _provider_errors():
-            response = await self._client.aio.models.generate_content(
-                model=self._model,
-                contents=prompt,
-                config=types.GenerateContentConfig(system_instruction=system, temperature=0.4),
+        response = await self._call(
+            self._client.aio.models.generate_content(
+                model=self._model, contents=prompt, config=self._config(system)
             )
+        )
         return (response.text or "").strip()
 
     async def embed(self, texts: list[str], *, task: EmbedTask) -> list[list[float]]:
         if not texts:
             return []
-        async with _provider_errors():
-            response = await self._client.aio.models.embed_content(
+        response = await self._call(
+            self._client.aio.models.embed_content(
                 model=self._embedding_model,
                 contents=texts,
                 config=types.EmbedContentConfig(
@@ -72,6 +106,7 @@ class GeminiClient:
                     output_dimensionality=self._embedding_dim,
                 ),
             )
+        )
         return [list(e.values or []) for e in response.embeddings or []]
 
     async def step(self, *, system: str, history: list[Message], tools: list[ToolSpec]) -> LLMStep:
@@ -81,17 +116,17 @@ class GeminiClient:
             )
             for t in tools
         ]
-        async with _provider_errors():
-            response = await self._client.aio.models.generate_content(
+        response = await self._call(
+            self._client.aio.models.generate_content(
                 model=self._model,
                 contents=self._to_contents(history),
-                config=types.GenerateContentConfig(
-                    system_instruction=system,
-                    temperature=0.0,
+                config=self._config(
+                    system,
                     tools=[types.Tool(function_declarations=declarations)],
                     automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
                 ),
             )
+        )
         raw = response.candidates[0].content if response.candidates else None
         calls = [
             ToolCall(id=fc.id or f"call_{i}", name=fc.name or "", args=dict(fc.args or {}))
@@ -125,13 +160,13 @@ class GeminiClient:
         if message.role == "assistant" and isinstance(message.raw, types.Content):
             return message.raw  # keeps thought signatures required for multi-turn tool use
         if message.role == "tool":
-            result: dict[str, Any] = message.tool_result or {}
-            return types.Content(
-                role="user",
-                parts=[
-                    types.Part.from_function_response(name=message.tool_name or "", response=result)
-                ],
+            # Gemini 3 expects every function response to carry the call id and name.
+            response = types.FunctionResponse(
+                id=message.tool_call_id,
+                name=message.tool_name or "",
+                response=message.tool_result or {},
             )
+            return types.Content(role="user", parts=[types.Part(function_response=response)])
         if message.role == "assistant":
             parts = [types.Part(text=message.text)] if message.text else []
             parts += [

@@ -18,5 +18,7 @@ def get_llm() -> LLMClient:
             model=settings.llm_model,
             embedding_model=settings.embedding_model,
             embedding_dim=EMBEDDING_DIM,
+            thinking_level=settings.llm_thinking_level or None,
+            call_timeout=settings.llm_call_timeout_seconds,
         )
     return FakeLLM()

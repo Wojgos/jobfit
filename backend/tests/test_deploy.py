@@ -108,17 +108,39 @@ class TestDemoMode:
 
 
 class TestProviderErrors:
-    async def test_gemini_errors_become_llm_errors_with_the_right_status(self) -> None:
+    async def test_gemini_errors_and_timeouts_become_llm_errors(self) -> None:
+        import asyncio
+
         from google.genai import errors
 
         from app.llm.base import LLMError
-        from app.llm.gemini import _provider_errors
+        from app.llm.gemini import GeminiClient
+
+        client = GeminiClient(
+            api_key="test", model="m", embedding_model="e", embedding_dim=8, call_timeout=0.05
+        )
+
+        async def failing(code: int) -> None:
+            raise errors.ClientError(code, {"error": {"code": code, "message": "x"}})
 
         for code, expected in [(429, 429), (404, 503), (500, 503)]:
             with pytest.raises(LLMError) as caught:
-                async with _provider_errors():
-                    raise errors.ClientError(code, {"error": {"code": code, "message": "x"}})
+                await client._call(failing(code))
             assert caught.value.status_code == expected
+
+        with pytest.raises(LLMError) as slow:
+            await client._call(asyncio.sleep(1))
+        assert slow.value.status_code == 504
+
+    def test_tool_results_carry_the_call_id(self) -> None:
+        from app.llm.base import Message
+        from app.llm.gemini import GeminiClient
+
+        content = GeminiClient._to_content(
+            Message(role="tool", tool_name="search_cv", tool_call_id="c1", tool_result={"a": 1})
+        )
+        response = content.parts[0].function_response  # type: ignore[index]
+        assert (response.id, response.name, response.response) == ("c1", "search_cv", {"a": 1})  # type: ignore[union-attr]
 
     async def test_api_answers_with_the_llm_error_status(
         self, client: httpx.AsyncClient, cv: dict[str, object]

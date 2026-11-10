@@ -27,7 +27,9 @@ async def run_agent(llm: LLMClient, ctx: AgentContext, question: str, max_steps:
         )
         for call in step.tool_calls:
             result = await run_tool(call.name, call.args, ctx)
-            history.append(Message(role="tool", tool_name=call.name, tool_result=result))
+            history.append(
+                Message(role="tool", tool_name=call.name, tool_call_id=call.id, tool_result=result)
+            )
             trace.append(
                 ToolTrace(
                     tool=call.name,

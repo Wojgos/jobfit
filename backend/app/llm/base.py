@@ -37,6 +37,7 @@ class Message:
     text: str = ""
     tool_calls: list[ToolCall] = field(default_factory=list)
     tool_name: str | None = None
+    tool_call_id: str | None = None
     tool_result: dict[str, Any] | None = None
     # Provider-native message (e.g. Gemini Content with thought signatures), replayed as-is.
     raw: Any = None
